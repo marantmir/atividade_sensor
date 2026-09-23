@@ -13,22 +13,28 @@ static const char *TAG = "MPU6050_APP";
 #define I2C_MASTER_NUM              I2C_NUM_0
 #define I2C_MASTER_FREQ_HZ          100000
 #define I2C_MASTER_TIMEOUT_MS       1000
+
 #define MPU6050_ADDR                0x68
 #define MPU6050_PWR_MGMT_1          0x6B
-#define MPU6050_ACCEL_XOUT_H        0x3B
+#define MPU6050_DATA_START          0x3B
 
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t mpu6050_dev = NULL;
 
 static esp_err_t mpu6050_register_write(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data)
 {
-    uint8_t write_buf[2] = { reg_addr, data };
+    uint8_t write_buf[2] = {reg_addr, data};
     return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS);
 }
 
 static esp_err_t mpu6050_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
 {
     return i2c_master_transmit_receive(dev_handle, &reg_addr, 1, data, len, I2C_MASTER_TIMEOUT_MS);
+}
+
+static int16_t bytes_to_int16(uint8_t high, uint8_t low)
+{
+    return (int16_t)(((uint16_t)high << 8) | low);
 }
 
 static esp_err_t i2c_master_init(void)
@@ -72,22 +78,44 @@ void app_main(void)
     ESP_ERROR_CHECK(mpu6050_register_write(mpu6050_dev, MPU6050_PWR_MGMT_1, 0x00));
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    ESP_LOGI(TAG, "Sensor MPU6050 ativo! Lendo dados...");
+    ESP_LOGI(TAG, "Sensor MPU6050 ativo! Lendo acelerometro e giroscopio...");
 
-    uint8_t raw_data[6];
-    int16_t accel_x, accel_y, accel_z;
+    uint8_t raw_data[14];
 
     while (1) {
-        esp_err_t ret = mpu6050_register_read(mpu6050_dev, MPU6050_ACCEL_XOUT_H, raw_data, sizeof(raw_data));
+        esp_err_t ret = mpu6050_register_read(
+            mpu6050_dev,
+            MPU6050_DATA_START,
+            raw_data,
+            sizeof(raw_data)
+        );
 
         if (ret == ESP_OK) {
-            accel_x = (int16_t)((uint16_t)raw_data[0] << 8 | raw_data[1]);
-            accel_y = (int16_t)((uint16_t)raw_data[2] << 8 | raw_data[3]);
-            accel_z = (int16_t)((uint16_t)raw_data[4] << 8 | raw_data[5]);
+            int16_t accel_x = bytes_to_int16(raw_data[0], raw_data[1]);
+            int16_t accel_y = bytes_to_int16(raw_data[2], raw_data[3]);
+            int16_t accel_z = bytes_to_int16(raw_data[4], raw_data[5]);
 
-            ESP_LOGI(TAG, "Acelerometro [X: %d | Y: %d | Z: %d]", accel_x, accel_y, accel_z);
+            int16_t gyro_x = bytes_to_int16(raw_data[8], raw_data[9]);
+            int16_t gyro_y = bytes_to_int16(raw_data[10], raw_data[11]);
+            int16_t gyro_z = bytes_to_int16(raw_data[12], raw_data[13]);
+
+            ESP_LOGI(
+                TAG,
+                "Acelerometro [X: %d | Y: %d | Z: %d]",
+                accel_x,
+                accel_y,
+                accel_z
+            );
+
+            ESP_LOGI(
+                TAG,
+                "Giroscopio   [X: %d | Y: %d | Z: %d]",
+                gyro_x,
+                gyro_y,
+                gyro_z
+            );
         } else {
-            ESP_LOGE(TAG, "Erro ao ler o sensor!");
+            ESP_LOGE(TAG, "Erro ao ler o MPU6050: %s", esp_err_to_name(ret));
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
