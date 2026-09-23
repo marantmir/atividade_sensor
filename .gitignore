@@ -1,0 +1,4 @@
+build/
+build-check/
+.vscode/
+sdkconfig.old
